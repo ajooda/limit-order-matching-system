@@ -10,7 +10,9 @@ Route::middleware('auth:sanctum')->group(function () {
         return $request->user();
     });
     Route::prefix('orders')->group(function (Router $route) {
-        $route->post('/', [OrderController::class, 'store']);
+        $route->post('/', [OrderController::class, 'storeOrder']);
+        $route->post('/{orderId}/cancel', [OrderController::class, 'cancelOrder']);
+
     });
 
 });

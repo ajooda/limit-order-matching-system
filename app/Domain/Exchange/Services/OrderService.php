@@ -15,7 +15,6 @@ use Illuminate\Validation\ValidationException;
 
 class OrderService
 {
-
     public function createOrder(User $user, CreateOrderData $dto): Order
     {
         return DB::transaction(function () use ($user, $dto) {
@@ -31,14 +30,11 @@ class OrderService
      */
     private function createBuyOrder(User $user, CreateOrderData $dto): Order
     {
-        $lockedUser = User::query()
-            ->whereKey($user->id)
-            ->lockForUpdate()
-            ->firstOrFail();
+        $lockedUser = $this->getLockedUser($user->id);
 
         $lockTotal = FeeCalculator::calculateTotal($dto->price, $dto->amount);
 
-        if (!Money::gte($lockedUser->balance_usd, $lockTotal, Money::USD_SCALE)) {
+        if (! Money::gte($lockedUser->balance_usd, $lockTotal, Money::USD_SCALE)) {
             throw ValidationException::withMessages([
                 'balance_usd' => 'Insufficient USD balance.',
             ]);
@@ -73,7 +69,7 @@ class OrderService
             ->lockForUpdate()
             ->first();
 
-        if (!$asset) {
+        if (! $asset) {
             $user->assets()->create([
                 'symbol' => $dto->symbol,
                 'amount' => '0',
@@ -86,7 +82,7 @@ class OrderService
                 ->firstOrFail();
         }
 
-        if (!Money::gte($asset->amount, $dto->amount, Money::ASSET_SCALE)) {
+        if (! Money::gte($asset->amount, $dto->amount, Money::ASSET_SCALE)) {
             throw ValidationException::withMessages([
                 'amount' => "Insufficient {$dto->symbol} balance.",
             ]);
@@ -105,10 +101,92 @@ class OrderService
             'locked_usd' => '0',
         ]);
 
-
         // TODO: Dispatch matching job
 
         return $order;
     }
 
+    public function cancelOrder(User $user, Order $order): Order
+    {
+        return DB::transaction(function () use ($user, $order) {
+
+            /** @var Order $lockedOrder */
+            $lockedOrder = $user->orders()
+                ->whereKey($order->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if (! $lockedOrder->isOpenOrder()) {
+                throw ValidationException::withMessages([
+                    'order' => 'Only open orders can be cancelled.',
+                ]);
+            }
+
+            match ($lockedOrder->side) {
+                OrderSide::BUY => $this->cancelBuyOrder($lockedOrder),
+                OrderSide::SELL => $this->cancelSellOrder($user, $lockedOrder),
+            };
+
+            $lockedOrder->update([
+                'status' => OrderStatus::CANCELLED->value,
+                'cancelled_at' => now(),
+            ]);
+
+            return $lockedOrder->refresh();
+
+        }, 3);
+
+    }
+
+    private function cancelBuyOrder(Order $order): void
+    {
+        $lockedUser = $this->getLockedUser($order->user_id);
+
+        $refund = (string) $order->locked_usd;
+
+        if (Money::cmp($refund, '0', Money::USD_SCALE) > 0) {
+            $lockedUser->balance_usd = Money::add($lockedUser->balance_usd, $refund, Money::USD_SCALE);
+            $lockedUser->save();
+        }
+
+        $order->locked_usd = '0';
+        $order->save();
+    }
+
+    /**
+     * @throws ValidationException
+     */
+    private function cancelSellOrder(User $user, Order $order): void
+    {
+        $lockedAsset = $user->assets()
+            ->whereHas($order->symbol)
+            ->lockForUpdate()
+            ->firstOr(function () {
+                throw ValidationException::withMessages([
+                    'asset' => 'Asset wallet not found for this order.',
+                ]);
+            });
+
+        $qty = $order->amount;
+
+        if (Money::cmp($lockedAsset->locked_amount, $qty, Money::ASSET_SCALE) < 0) {
+            throw ValidationException::withMessages([
+                'amount' => 'Locked asset amount is insufficient to cancel this order',
+            ]);
+        }
+
+        $lockedAsset->update([
+            'locked_amount' => Money::sub($lockedAsset->locked_amount, $qty, Money::ASSET_SCALE),
+            'amount' => Money::add($lockedAsset->amount, $qty, Money::ASSET_SCALE),
+        ]);
+
+    }
+
+    private function getLockedUser(string|int $userKey)
+    {
+        return User::query()
+            ->whereKey($userKey)
+            ->lockForUpdate()
+            ->firstOrFail();
+    }
 }

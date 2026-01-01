@@ -40,4 +40,9 @@ class Order extends Model
     {
         return $this->hasMany(Trade::class, 'sell_order_id');
     }
+
+    public function isOpenOrder(): bool
+    {
+        return $this->status === OrderStatus::OPEN;
+    }
 }

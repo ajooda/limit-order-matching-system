@@ -8,16 +8,16 @@ use App\Enums\OrderSide;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreOrderRequest;
 use App\Http\Resources\OrderResource;
+use App\Models\User;
+use Illuminate\Http\Request;
 
 class OrderController extends Controller
 {
     public function __construct(
         private readonly OrderService $orderService
-    )
-    {
-    }
+    ) {}
 
-    public function store(StoreOrderRequest $request): OrderResource
+    public function storeOrder(StoreOrderRequest $request): OrderResource
     {
         $data = $request->validated();
 
@@ -38,4 +38,18 @@ class OrderController extends Controller
         return new OrderResource($order);
     }
 
+    public function cancelOrder(Request $request, string $orderId): OrderResource
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $order = $user->orders()
+            ->whereKey($orderId)
+            ->firstOrFail();
+
+        $updated = $this->orderService->cancelOrder($user, $order);
+
+        return new OrderResource($updated);
+
+    }
 }
