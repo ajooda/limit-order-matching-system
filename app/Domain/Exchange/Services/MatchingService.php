@@ -157,7 +157,7 @@ class MatchingService
 
     private function normalizeBuySell(Order $a, Order $b): array
     {
-        if ((int) $a->side == OrderSide::BUY) {
+        if ($a->side === OrderSide::BUY) {
             return [$a, $b];
         }
 
