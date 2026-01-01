@@ -17,12 +17,20 @@ class OrderService
 {
     public function createOrder(User $user, CreateOrderData $dto): Order
     {
-        return DB::transaction(function () use ($user, $dto) {
+
+        $order = DB::transaction(function () use ($user, $dto) {
             return match ($dto->side) {
                 OrderSide::BUY => $this->createBuyOrder($user, $dto),
                 OrderSide::SELL => $this->createSellOrder($user, $dto),
             };
         }, 3);
+
+        DB::afterCommit(function () use ($order) {
+            MatchOrderJob::dispatch($order->id);
+        });
+
+        return $order;
+
     }
 
     /**
@@ -44,7 +52,7 @@ class OrderService
 
         $lockedUser->save();
 
-        $order = $lockedUser->orders()->create([
+        return $lockedUser->orders()->create([
             'symbol' => $dto->symbol,
             'side' => OrderSide::BUY->value,
             'status' => OrderStatus::OPEN->value,
@@ -52,10 +60,6 @@ class OrderService
             'amount' => $dto->amount,
             'locked_usd' => $lockTotal,
         ]);
-
-        // TODO: Dispatch matching job
-
-        return $order;
 
     }
 
@@ -92,7 +96,7 @@ class OrderService
         $asset->locked_amount = Money::add($asset->locked_amount, $dto->amount, Money::ASSET_SCALE);
         $asset->save();
 
-        $order = $user->orders()->create([
+        return $user->orders()->create([
             'symbol' => $dto->symbol,
             'side' => OrderSide::SELL->value,
             'status' => OrderStatus::OPEN->value,
@@ -101,9 +105,6 @@ class OrderService
             'locked_usd' => '0',
         ]);
 
-        // TODO: Dispatch matching job
-
-        return $order;
     }
 
     public function cancelOrder(User $user, Order $order): Order
