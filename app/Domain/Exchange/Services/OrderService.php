@@ -75,7 +75,7 @@ class OrderService
             ->first();
 
         if (! $asset) {
-            $user->assets()->create([
+            $asset = $user->assets()->create([
                 'symbol' => $dto->symbol,
                 'amount' => '0',
                 'locked_amount' => '0',
@@ -161,7 +161,7 @@ class OrderService
     private function cancelSellOrder(User $user, Order $order): void
     {
         $lockedAsset = $user->assets()
-            ->whereHas($order->symbol)
+            ->whereSymbol($order->symbol)
             ->lockForUpdate()
             ->firstOr(function () {
                 throw ValidationException::withMessages([
