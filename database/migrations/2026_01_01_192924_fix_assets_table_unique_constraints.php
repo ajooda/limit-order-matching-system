@@ -12,7 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('assets', function (Blueprint $table) {
-            $table->dropForeign('assets_user_id_foreign');
+            $table->dropForeign(['user_id']);
             $table->dropUnique('assets_user_id_unique');
             $table->unique(['user_id', 'symbol'], 'assets_user_symbol_unique');
             $table->foreign('user_id')
@@ -28,7 +28,7 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('assets', function (Blueprint $table) {
-            $table->dropForeign('assets_user_id_foreign');
+            $table->dropForeign(['user_id']);
             $table->dropUnique('assets_user_symbol_unique');
             $table->unique('user_id', 'assets_user_id_unique');
             $table->foreign('user_id')
