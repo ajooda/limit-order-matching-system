@@ -5,6 +5,7 @@ namespace App\Domain\Exchange\Services;
 use App\Domain\Exchange\DTO\CreateOrderData;
 use App\Enums\OrderSide;
 use App\Enums\OrderStatus;
+use App\Jobs\MatchOrderJob;
 use App\Models\Asset;
 use App\Models\Order;
 use App\Models\User;
