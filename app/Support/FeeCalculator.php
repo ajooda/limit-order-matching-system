@@ -15,7 +15,7 @@ class FeeCalculator
     {
         $volume = Money::mul($price, $amount, $scale);
         $fee = self::calculateFee($volume, $scale);
+
         return Money::add($volume, $fee, $scale);
     }
-
 }

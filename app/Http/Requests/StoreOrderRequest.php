@@ -24,10 +24,9 @@ class StoreOrderRequest extends FormRequest
     {
         return [
             'symbol' => ['required', 'string', Rule::in(['BTC', 'ETH'])],
-            'side'   => ['required', 'string', Rule::in(['buy', 'sell'])],
-            'price'  => ['required', 'numeric', 'gt:0'],
+            'side' => ['required', 'string', Rule::in(['buy', 'sell'])],
+            'price' => ['required', 'numeric', 'gt:0'],
             'amount' => ['required', 'numeric', 'gt:0'],
         ];
     }
-
 }
