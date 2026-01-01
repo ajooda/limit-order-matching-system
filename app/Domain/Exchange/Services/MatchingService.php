@@ -17,7 +17,7 @@ class MatchingService
     public function attemptMatchSelection(int $orderId): void
     {
         $trade = DB::transaction(function () use ($orderId) {
-            $this->attemptMatch($orderId);
+            return $this->attemptMatch($orderId);
         }, 3);
 
         DB::afterCommit(function () use ($trade) {
@@ -49,13 +49,13 @@ class MatchingService
             ->first();
 
         if (! $order || ! $order->isOpenOrder()) {
-            return;
+            return null;
         }
 
         $counter = $this->findAndLockCounterOrder($order);
 
         if (! $counter) {
-            return;
+            return null;
         }
 
         [$buyOrder, $sellOrder] = $this->normalizeBuySell($order, $counter);
@@ -80,7 +80,7 @@ class MatchingService
                 ]);
             });
 
-        if (! Money::gte($sellerAsset->locked_usd, $tradeAmount, Money::ASSET_SCALE)) {
+        if (! Money::gte($sellerAsset->locked_amount, $tradeAmount, Money::ASSET_SCALE)) {
             throw ValidationException::withMessages([
                 'asset' => 'Seller locked amount insufficient',
             ]);
@@ -93,7 +93,7 @@ class MatchingService
         }
 
         $refund = Money::sub($buyOrder->locked_usd, $actualTotal, Money::USD_SCALE);
-        if (! Money::gte($refund, '0', Money::USD_SCALE)) {
+        if (Money::cmp($refund, '0', Money::USD_SCALE) > 0) {
             $buyer->balance_usd = Money::add($buyer->balance_usd, $refund, Money::USD_SCALE);
         }
 
@@ -107,21 +107,20 @@ class MatchingService
             ->first();
 
         if (! $buyerAsset) {
-            $buyer->assets()->create([
+            $buyerAsset = $buyer->assets()->create([
                 'symbol' => $buyOrder->symbol,
                 'amount' => '0',
                 'locked_amount' => '0',
             ]);
 
             $buyerAsset = $buyer->assets()
-                ->whereSymbol($buyOrder->symbol)
+                ->whereKey($buyerAsset->id)
                 ->lockForUpdate()
-                ->first();
-
+                ->firstOrFail();
         }
 
         $buyerAsset->update([
-            'locked_amount' => Money::add($buyerAsset->locked_amount, $tradeAmount, Money::ASSET_SCALE),
+            'amount' => Money::add($buyerAsset->amount, $tradeAmount, Money::ASSET_SCALE),
         ]);
 
         $seller->balance_usd = Money::add($seller->balance_usd, $volume, Money::USD_SCALE);
@@ -188,13 +187,12 @@ class MatchingService
 
         $counter = $query->lockForUpdate()->first();
 
-        if (! $counter) {
+        if (! $counter || ! $counter->isOpenOrder()) {
             return null;
         }
 
         if (Money::cmp($counter->amount, $order->amount, Money::ASSET_SCALE) !== 0) {
             return null;
-
         }
 
         return $counter;
