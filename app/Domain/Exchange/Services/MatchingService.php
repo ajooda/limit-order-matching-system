@@ -4,6 +4,7 @@ namespace App\Domain\Exchange\Services;
 
 use App\Enums\OrderSide;
 use App\Enums\OrderStatus;
+use App\Events\OrderMatchedEvent;
 use App\Models\Order;
 use App\Models\Trade;
 use App\Support\FeeCalculator;
@@ -15,16 +16,31 @@ class MatchingService
 {
     public function attemptMatchSelection(int $orderId): void
     {
-        DB::transaction(function () use ($orderId) {
+        $trade = DB::transaction(function () use ($orderId) {
             $this->attemptMatch($orderId);
         }, 3);
 
+        DB::afterCommit(function () use ($trade) {
+
+            if ($trade) {
+                $buyer = $trade->buyer()
+                    ->with(['assets:id,user_id,symbol,amount,locked_amount'])
+                    ->first();
+
+                $seller = $trade->seller()
+                    ->with(['assets:id,user_id,symbol,amount,locked_amount'])
+                    ->first();
+
+                event(new OrderMatchedEvent($trade, $buyer));
+                event(new OrderMatchedEvent($trade, $seller));
+            }
+        });
     }
 
     /**
      * @throws ValidationException
      */
-    public function attemptMatch(int $orderId): void
+    public function attemptMatch(int $orderId): ?Trade
     {
 
         $order = Order::query()
@@ -126,7 +142,7 @@ class MatchingService
             'filled_at' => $now,
         ]);
 
-        Trade::query()->create([
+        return Trade::query()->create([
             'symbol' => $buyOrder->symbol,
             'price' => $tradePrice,
             'amount' => $tradeAmount,
@@ -142,7 +158,7 @@ class MatchingService
 
     private function normalizeBuySell(Order $a, Order $b): array
     {
-        if ((int) $a->side === OrderSide::BUY) {
+        if ((int) $a->side == OrderSide::BUY) {
             return [$a, $b];
         }
 
