@@ -5,48 +5,148 @@ namespace App\Domain\Exchange\Services;
 use App\Enums\OrderSide;
 use App\Enums\OrderStatus;
 use App\Models\Order;
+use App\Models\Trade;
+use App\Support\FeeCalculator;
 use App\Support\Money;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 
 class MatchingService
 {
     public function attemptMatchSelection(int $orderId): void
     {
         DB::transaction(function () use ($orderId) {
+            $this->attemptMatch($orderId);
+        }, 3);
 
-            $order = Order::query()
-                ->whereKey($orderId)
+    }
+
+    /**
+     * @throws ValidationException
+     */
+    public function attemptMatch(int $orderId): void
+    {
+
+        $order = Order::query()
+            ->whereKey($orderId)
+            ->lockForUpdate()
+            ->first();
+
+        if (! $order || ! $order->isOpenOrder()) {
+            return;
+        }
+
+        $counter = $this->findAndLockCounterOrder($order);
+
+        if (! $counter) {
+            return;
+        }
+
+        [$buyOrder, $sellOrder] = $this->normalizeBuySell($order, $counter);
+
+        $tradePrice = (string) $counter->price;
+
+        $tradeAmount = (string) $buyOrder->amount;
+
+        $volume = Money::mul($tradePrice, $tradeAmount, Money::USD_SCALE);
+        $fee = FeeCalculator::calculateFee($volume, Money::USD_SCALE);
+        $actualTotal = FeeCalculator::calculateTotal($tradePrice, $tradeAmount, Money::USD_SCALE);
+
+        $buyer = $buyOrder->user()->lockForUpdate()->first();
+        $seller = $sellOrder->user()->lockForUpdate()->first();
+
+        $sellerAsset = $seller->assets()
+            ->whereSymbol($sellOrder->symbol)
+            ->lockForUpdate()
+            ->firstOr(function () {
+                throw ValidationException::withMessages([
+                    'asset' => 'Seller asset wallet not found.',
+                ]);
+            });
+
+        if (! Money::gte($sellerAsset->locked_usd, $tradeAmount, Money::ASSET_SCALE)) {
+            throw ValidationException::withMessages([
+                'asset' => 'Seller locked amount insufficient',
+            ]);
+        }
+
+        if (! Money::gte($buyOrder->locked_usd, $actualTotal, Money::USD_SCALE)) {
+            throw ValidationException::withMessages([
+                'balance' => 'Buyer locked USD is insufficient for settlement (data integrity issue).',
+            ]);
+        }
+
+        $refund = Money::sub($buyOrder->locked_usd, $actualTotal, Money::USD_SCALE);
+        if (! Money::gte($refund, '0', Money::USD_SCALE)) {
+            $buyer->balance_usd = Money::add($buyer->balance_usd, $refund, Money::USD_SCALE);
+        }
+
+        $sellerAsset->update([
+            'locked_amount' => Money::sub($sellerAsset->locked_amount, $tradeAmount, Money::ASSET_SCALE),
+        ]);
+
+        $buyerAsset = $buyer->assets()
+            ->whereSymbol($buyOrder->symbol)
+            ->lockForUpdate()
+            ->first();
+
+        if (! $buyerAsset) {
+            $buyer->assets()->create([
+                'symbol' => $buyOrder->symbol,
+                'amount' => '0',
+                'locked_amount' => '0',
+            ]);
+
+            $buyerAsset = $buyer->assets()
+                ->whereSymbol($buyOrder->symbol)
                 ->lockForUpdate()
                 ->first();
 
-            if (! $order) {
-                return;
-            }
+        }
 
-            if (! $order->isOpenOrder()) {
-                return;
-            }
+        $buyerAsset->update([
+            'locked_amount' => Money::add($buyerAsset->locked_amount, $tradeAmount, Money::ASSET_SCALE),
+        ]);
 
-            $counter = $this->findAndLockCounterOrder($order);
+        $seller->balance_usd = Money::add($seller->balance_usd, $volume, Money::USD_SCALE);
 
-            if (! $counter) {
-                return;
-            }
+        $buyer->save();
+        $seller->save();
 
-            Log::info('Match candidate found', [
-                'order_id' => $order->id,
-                'order_side' => $order->side,
-                'order_symbol' => $order->symbol,
-                'order_price' => (string) $order->price,
-                'order_amount' => (string) $order->amount,
-                'counter_order_id' => $counter->id,
-                'counter_side' => $counter->side,
-                'counter_price' => (string) $counter->price,
-                'counter_amount' => (string) $counter->amount,
-            ]);
+        $now = now();
 
-        }, 3);
+        $buyOrder->update([
+            'status' => OrderStatus::FILLED->value,
+            'filled_at' => $now,
+            'locked_usd' => 0,
+        ]);
+
+        $sellOrder->update([
+            'status' => OrderStatus::FILLED->value,
+            'filled_at' => $now,
+        ]);
+
+        Trade::query()->create([
+            'symbol' => $buyOrder->symbol,
+            'price' => $tradePrice,
+            'amount' => $tradeAmount,
+            'usd_volume' => $volume,
+            'fee_usd' => $fee,
+            'buy_order_id' => $buyOrder->id,
+            'sell_order_id' => $sellOrder->id,
+            'buyer_id' => $buyer->id,
+            'seller_id' => $seller->id,
+        ]);
+
+    }
+
+    private function normalizeBuySell(Order $a, Order $b): array
+    {
+        if ((int) $a->side === OrderSide::BUY) {
+            return [$a, $b];
+        }
+
+        return [$b, $a];
     }
 
     private function findAndLockCounterOrder(Order $order): ?Order
