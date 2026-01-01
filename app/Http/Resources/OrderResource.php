@@ -21,9 +21,9 @@ class OrderResource extends JsonResource
             'status' => $this->status,
             'price' => (string) $this->price,
             'amount' => (string) $this->amount,
-            'locked_usd' => (string) $this->locked_usd,
-            'created_at' => $this->created_at?->toISOString(),
-            'updated_at' => $this->updated_at?->toISOString(),
+            'locked_usd' => $this->whenHas('locked_usd', (string) $this->locked_usd),
+            'created_at' => $this->whenHas('created_at', $this->created_at?->toISOString()),
+            'updated_at' => $this->whenHas('updated_at', $this->updated_at?->toISOString()),
         ];
 
     }

@@ -5,17 +5,40 @@ namespace App\Http\Controllers\Api;
 use App\Domain\Exchange\DTO\CreateOrderData;
 use App\Domain\Exchange\Services\OrderService;
 use App\Enums\OrderSide;
+use App\Enums\OrderStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreOrderRequest;
 use App\Http\Resources\OrderResource;
+use App\Models\Order;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class OrderController extends Controller
 {
     public function __construct(
         private readonly OrderService $orderService
     ) {}
+
+    public function getOrders(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'symbol' => ['required', 'string', Rule::in(['BTC', 'ETH'])],
+        ]);
+
+        $buyOrders = $this->getOrdersRecoreds($validated['symbol'], OrderSide::BUY, 'desc');
+
+        $sellOrders = $this->getOrdersRecoreds($validated['symbol'], OrderSide::SELL, 'asc');
+
+        return response()->json([
+            'symbol' => $validated['symbol'],
+            'buy' => OrderResource::collection($buyOrders),
+            'sell' => OrderResource::collection($sellOrders),
+        ]);
+
+    }
 
     public function storeOrder(StoreOrderRequest $request): OrderResource
     {
@@ -51,5 +74,18 @@ class OrderController extends Controller
 
         return new OrderResource($updated);
 
+    }
+
+    private function getOrdersRecoreds($symbol, OrderSide $side, $priceDirection = 'asc'): Collection
+    {
+        return Order::query()
+            ->select(['id', 'symbol', 'side', 'status', 'price', 'amount', 'created_at'])
+            ->wheresymbol($symbol)
+            ->whereStatus(OrderStatus::OPEN->value)
+            ->whereSide($side->value)
+            ->orderBy('price', $priceDirection)
+            ->orderBy('created_at')
+            ->orderBy('id')
+            ->get();
     }
 }
