@@ -31,7 +31,6 @@ class OrderFactory extends Factory
         ];
     }
 
-   
     public function buyOpen(
         string $symbol = 'BTC',
         string $price = '95000.00000000',
@@ -50,7 +49,6 @@ class OrderFactory extends Factory
             $buyer->save();
         });
     }
-
 
     public function sellOpen(
         string $symbol = 'BTC',
