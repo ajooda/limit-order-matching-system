@@ -27,15 +27,17 @@ class OrderController extends Controller
     public function getOrders(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'symbol' => ['required', 'string', Rule::in(['BTC', 'ETH'])],
+            'symbol' => ['nullable', 'string', Rule::in(['BTC', 'ETH'])],
         ]);
 
-        $buyOrders = $this->getOrdersRecoreds($validated['symbol'], OrderSide::BUY, 'desc');
+        $symbol = $validated['symbol'] ?? null;
 
-        $sellOrders = $this->getOrdersRecoreds($validated['symbol'], OrderSide::SELL, 'asc');
+        $buyOrders = $this->getOrdersRecoreds($symbol, OrderSide::BUY, 'desc');
+
+        $sellOrders = $this->getOrdersRecoreds($symbol, OrderSide::SELL, 'asc');
 
         return response()->json([
-            'symbol' => $validated['symbol'],
+            'symbol' => $symbol,
             'buy' => OrderResource::collection($buyOrders),
             'sell' => OrderResource::collection($sellOrders),
         ]);
@@ -108,13 +110,18 @@ class OrderController extends Controller
 
     }
 
-    private function getOrdersRecoreds($symbol, OrderSide $side, $priceDirection = 'asc'): Collection
+    private function getOrdersRecoreds(?string $symbol, OrderSide $side, $priceDirection = 'asc'): Collection
     {
-        return Order::query()
+        $query = Order::query()
             ->select(['id', 'symbol', 'side', 'status', 'price', 'amount', 'created_at'])
-            ->wheresymbol($symbol)
             ->whereStatus(OrderStatus::OPEN->value)
-            ->whereSide($side->value)
+            ->whereSide($side->value);
+
+        if ($symbol !== null) {
+            $query->whereSymbol($symbol);
+        }
+
+        return $query
             ->orderBy('price', $priceDirection)
             ->orderBy('created_at')
             ->orderBy('id')
