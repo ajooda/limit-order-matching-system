@@ -13,6 +13,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     Route::prefix('orders')->group(function (Router $route) {
         $route->get('/', [OrderController::class, 'getOrders']);
+        $route->post('/preview', [OrderController::class, 'previewOrder']);
         $route->post('/', [OrderController::class, 'storeOrder']);
         $route->post('/{orderId}/cancel', [OrderController::class, 'cancelOrder']);
     });

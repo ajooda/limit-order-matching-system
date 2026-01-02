@@ -4,7 +4,7 @@ namespace App\Support;
 
 class FeeCalculator
 {
-    private const FEE_RATE = 0.015;
+    public const FEE_RATE = 0.015;
 
     public static function calculateFee(string $usdVolume, int $scale = Money::USD_SCALE): string
     {

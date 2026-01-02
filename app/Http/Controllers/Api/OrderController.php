@@ -11,6 +11,8 @@ use App\Http\Requests\StoreOrderRequest;
 use App\Http\Resources\OrderResource;
 use App\Models\Order;
 use App\Models\User;
+use App\Support\FeeCalculator;
+use App\Support\Money;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -38,6 +40,36 @@ class OrderController extends Controller
             'sell' => OrderResource::collection($sellOrders),
         ]);
 
+    }
+
+    public function previewOrder(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'symbol' => ['required', 'string', Rule::in(['BTC', 'ETH'])],
+            'side' => ['required', 'string', Rule::in(['buy', 'sell'])],
+            'price' => ['required', 'numeric', 'gt:0'],
+            'amount' => ['required', 'numeric', 'gt:0'],
+        ]);
+
+        $price = (string) $validated['price'];
+        $amount = (string) $validated['amount'];
+        $side = strtolower($validated['side']);
+
+        $volume = Money::mul($price, $amount, Money::USD_SCALE);
+        $fee = '0.00000000';
+        $total = $volume;
+
+        if ($side === 'buy') {
+            $fee = FeeCalculator::calculateFee($volume, Money::USD_SCALE);
+            $total = FeeCalculator::calculateTotal($price, $amount, Money::USD_SCALE);
+        }
+
+        return response()->json([
+            'volume' => $volume,
+            'fee' => $fee,
+            'total' => $total,
+            'fee_rate' => FeeCalculator::FEE_RATE,
+        ]);
     }
 
     public function storeOrder(StoreOrderRequest $request): OrderResource
