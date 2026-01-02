@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as exchangeApi from '../api/exchange.js'
 import { useToastStore } from './toast.js'
+import { formatNumber } from '../utils/format.js'
 
 export const useExchangeStore = defineStore('exchange', () => {
     const profile = ref(null)
@@ -63,7 +64,7 @@ export const useExchangeStore = defineStore('exchange', () => {
                 fetchOrderbook(data.symbol),
             ])
             toastStore.success(
-                `Order placed: ${data.side.toUpperCase()} ${data.amount} ${data.symbol} @ $${data.price}`,
+                `Order placed: ${data.side.toUpperCase()} ${formatNumber(data.amount)} ${data.symbol} @ $${formatNumber(data.price)}`,
             )
             return order
         } catch (err) {
@@ -145,7 +146,7 @@ export const useExchangeStore = defineStore('exchange', () => {
             filledOrders.forEach((order) => {
                 const side = order.side === 1 ? 'BUY' : 'SELL'
                 toastStore.success(
-                    `Order filled: ${side} ${order.amount} ${order.symbol} @ $${order.price}`,
+                    `Order filled: ${side} ${formatNumber(order.amount)} ${order.symbol} @ $${formatNumber(order.price)}`,
                 )
             })
 
@@ -162,6 +163,41 @@ export const useExchangeStore = defineStore('exchange', () => {
         }
     }
 
+    function appendOrderToOrderbook(order) {
+        if (!order || !orderbook.value || order.status !== 1) {
+            return
+        }
+
+        if (orderbook.value.symbol && order.symbol !== orderbook.value.symbol) {
+            return
+        }
+
+        const orders = orderbook.value[order.side === 1 ? 'buy' : 'sell']
+        if (!orders) {
+            return
+        }
+
+        if (orders.some((o) => o.id === order.id)) {
+            return
+        }
+
+        orders.push({
+            id: order.id,
+            symbol: order.symbol,
+            side: order.side,
+            status: order.status,
+            price: String(order.price),
+            amount: String(order.amount),
+            created_at: order.created_at,
+        })
+
+        if (order.side === 1) {
+            orders.sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
+        } else {
+            orders.sort((a, b) => parseFloat(a.price) - parseFloat(b.price))
+        }
+    }
+
     return {
         profile,
         myOrders,
@@ -174,5 +210,6 @@ export const useExchangeStore = defineStore('exchange', () => {
         placeOrder,
         cancelOrder,
         applyOrderMatchedEvent,
+        appendOrderToOrderbook,
     }
 })
