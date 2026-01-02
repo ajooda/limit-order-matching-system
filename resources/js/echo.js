@@ -4,6 +4,8 @@ import Pusher from 'pusher-js'
 let echo = null
 let currentChannel = null
 let currentListener = null
+let orderbookChannel = null
+let orderCreatedListener = null
 
 export function initializeEcho() {
     if (echo) {
@@ -85,9 +87,52 @@ export function detachOrderMatchedListener() {
     }
 }
 
+export function attachOrderCreatedListener(callback) {
+    if (!echo) {
+        initializeEcho()
+    }
+
+    try {
+        if (orderbookChannel && orderCreatedListener) {
+            detachOrderCreatedListener()
+        }
+
+        orderbookChannel = echo.channel('orderbook')
+
+        orderbookChannel.error((error) => {
+            console.error('Orderbook channel subscription error', error)
+        })
+
+        orderCreatedListener = orderbookChannel.listen('.order.created', (payload) => {
+            try {
+                callback(payload)
+            } catch (error) {
+                console.error('Error processing order.created event', error)
+            }
+        })
+
+        return orderCreatedListener
+    } catch (error) {
+        console.error('Failed to attach order created listener', error)
+        orderbookChannel = null
+        orderCreatedListener = null
+        return null
+    }
+}
+
+export function detachOrderCreatedListener() {
+    if (orderbookChannel && orderCreatedListener) {
+        orderbookChannel.stopListening('.order.created', orderCreatedListener)
+        orderbookChannel.unsubscribe()
+        orderbookChannel = null
+        orderCreatedListener = null
+    }
+}
+
 export function disconnectEcho() {
     if (echo) {
         detachOrderMatchedListener()
+        detachOrderCreatedListener()
         echo.disconnect()
         echo = null
     }
