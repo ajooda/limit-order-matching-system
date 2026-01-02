@@ -5,6 +5,7 @@ namespace App\Domain\Exchange\Services;
 use App\Domain\Exchange\DTO\CreateOrderData;
 use App\Enums\OrderSide;
 use App\Enums\OrderStatus;
+use App\Events\OrderCreatedEvent;
 use App\Jobs\MatchOrderJob;
 use App\Models\Asset;
 use App\Models\Order;
@@ -28,6 +29,7 @@ class OrderService
 
         DB::afterCommit(function () use ($order) {
             MatchOrderJob::dispatch($order->id);
+            event(new OrderCreatedEvent($order));
         });
 
         return $order;
